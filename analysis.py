@@ -332,6 +332,16 @@ class BilibiliTextAnalyzer:
         print(f"总评论数: {total_comments}")
         print(f"有效评论数: {valid_comments}")
 
+        # 新增：评论性别统计
+        if 'sex' in df_comments.columns:
+            print("\n--- 评论性别分布 ---")
+            sex_counts = df_comments['sex'].value_counts(dropna=False)
+            for sex, count in sex_counts.items():
+                percent = count / total_comments * 100
+                print(f"{sex if pd.notna(sex) and sex != '' else '未知'}: {count} ({percent:.1f}%)")
+        else:
+            sex_counts = {}
+
         df_comments['content_length'] = df_comments['content'].astype(str).str.len()
         print(f"平均评论长度: {df_comments['content_length'].mean():.2f} 字符")
         print(f"最长评论: {df_comments['content_length'].max()} 字符")
@@ -397,7 +407,8 @@ class BilibiliTextAnalyzer:
                 'avg_likes': float(like_counts.mean()),
                 'max_likes': int(like_counts.max()),
                 'median_likes': float(like_counts.median())
-            }
+            },
+            'sex_distribution': sex_counts.to_dict() if hasattr(sex_counts, "to_dict") else {}
         }
     
     def analyze_video_content(self):
@@ -560,12 +571,50 @@ class BilibiliTextAnalyzer:
             axes[0, 1].set_xlabel('评论长度 (字符)')
             axes[0, 1].set_ylabel('频次')
         
-        # 3. 创作者性别分布
-        if creator_analysis and 'gender_distribution' in creator_analysis:
-            gender_data = creator_analysis['gender_distribution']
-            axes[0, 2].bar(gender_data.keys(), gender_data.values(), color=['pink', 'lightblue', 'lightgreen'])
-            axes[0, 2].set_title('创作者性别分布', fontsize=14)
-            axes[0, 2].set_ylabel('人数')
+        # 3. 评论&创作者性别分布（合并显示，双y轴）
+        if (comment_analysis and 'sex_distribution' in comment_analysis) or (creator_analysis and 'gender_distribution' in creator_analysis):
+            comment_sex = comment_analysis.get('sex_distribution', {}) if comment_analysis else {}
+            creator_sex = creator_analysis.get('gender_distribution', {}) if creator_analysis else {}
+            # 统一性别标签
+            def _normalize_sex_label(label):
+                if str(label) in ['男', 'male', 'Male', '1', 1]:
+                    return '男'
+                elif str(label) in ['女', 'female', 'Female', '2', 2]:
+                    return '女'
+                elif str(label) in ['保密', '', None, '0', 0]:
+                    return '未知'
+                return str(label)
+            comment_sex_norm = {}
+            for k, v in comment_sex.items():
+                label = _normalize_sex_label(k)
+                comment_sex_norm[label] = comment_sex_norm.get(label, 0) + v
+            creator_sex_norm = {}
+            for k, v in creator_sex.items():
+                label = _normalize_sex_label(k)
+                creator_sex_norm[label] = creator_sex_norm.get(label, 0) + v
+            all_labels = ['男', '女', '未知']
+            x = np.arange(len(all_labels))
+            comment_counts = [comment_sex_norm.get(l, 0) for l in all_labels]
+            creator_counts = [creator_sex_norm.get(l, 0) for l in all_labels]
+            bar_width = 0.35
+        
+            # 主y轴画评论用户
+            axes[0, 2].bar(x - bar_width/2, comment_counts, width=bar_width, label='评论用户', color='skyblue', alpha=0.8, edgecolor='black', zorder=2)
+            axes[0, 2].set_ylabel('评论用户人数')
+            # 副y轴画创作者
+            ax2 = axes[0, 2].twinx()
+            ax2.bar(x + bar_width/2, creator_counts, width=bar_width, label='创作者', color='pink', alpha=0.8, edgecolor='black', zorder=3)
+            ax2.set_ylabel('创作者人数')
+        
+            axes[0, 2].set_xticks(list(x))
+            axes[0, 2].set_xticklabels(all_labels)
+            axes[0, 2].set_title('评论用户与创作者性别分布', fontsize=14)
+            axes[0, 2].grid(axis='y', linestyle='--', alpha=0.5, zorder=1)
+        
+            # 合并图例
+            handles1, labels1 = axes[0, 2].get_legend_handles_labels()
+            handles2, labels2 = ax2.get_legend_handles_labels()
+            axes[0, 2].legend(handles1 + handles2, labels1 + labels2, loc='upper right')
         
         # 4. 视频播放量分布
         if self.contents_data:
