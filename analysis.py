@@ -12,6 +12,7 @@ from snownlp import SnowNLP
 import warnings
 from datetime import datetime
 import os
+import yaml
 warnings.filterwarnings('ignore')
 
 # 设置中文字体
@@ -19,17 +20,27 @@ plt.rcParams['font.sans-serif'] = ['SimHei', 'Microsoft YaHei']
 plt.rcParams['axes.unicode_minus'] = False
 
 class BilibiliTextAnalyzer:
-    def __init__(self):
+    def __init__(self, config_path="config.yaml"):
         self.comments_data = []
         self.contents_data = []
         self.creators_data = []
-        
+        self.config = self._load_config(config_path)
+  
         # 精简停用词列表，保留更多有意义词汇
         self.stop_words = self._load_stop_words()
-        
+
         # 添加自定义词典
         self._add_custom_words()
-    
+
+    def _load_config(self, config_path):
+        """加载配置文件"""
+        if os.path.exists(config_path):
+            with open(config_path, "r", encoding="utf-8") as f:
+                return yaml.safe_load(f)
+        else:
+            print(f"⚠️ 未找到配置文件 {config_path}，将使用默认参数")
+            return {}
+
     def _load_stop_words(self):
         """加载停用词列表 - 精简版本"""
         # 只保留最核心的停用词，减少过度过滤
@@ -181,6 +192,9 @@ class BilibiliTextAnalyzer:
     
     def extract_keywords_advanced(self, text_list, top_k=30):
         """高级关键词提取 - 多种方法组合"""
+        # 将 top_k 参数传递给方法时，优先使用 config.yaml
+        top_k = self.config.get("analysis", {}).get("top_keywords", top_k)
+
         # 清理和合并文本
         cleaned_texts = []
         for text in text_list:
@@ -240,6 +254,9 @@ class BilibiliTextAnalyzer:
     
     def extract_keywords(self, text_list, top_k=20, method='tfidf'):
         """提取关键词 - 兼容原接口"""
+        # 将 top_k 参数传递给方法时，优先使用 config.yaml
+        top_k = self.config.get("analysis", {}).get("top_keywords", top_k)
+
         if method == 'advanced':
             return self.extract_keywords_advanced(text_list, top_k)
         
@@ -286,18 +303,18 @@ class BilibiliTextAnalyzer:
         """情绪分析"""
         if not text or pd.isna(text):
             return 0.5, "中性"
-        
         try:
             s = SnowNLP(str(text))
             sentiment_score = s.sentiments
-            
-            if sentiment_score > 0.6:
+            # 使用 config.yaml 的阈值
+            pos_thres = self.config.get("analysis", {}).get("positive_threshold", 0.6)
+            neg_thres = self.config.get("analysis", {}).get("negative_threshold", 0.4)
+            if sentiment_score > pos_thres:
                 sentiment_label = "积极"
-            elif sentiment_score < 0.4:
+            elif sentiment_score < neg_thres:
                 sentiment_label = "消极"
             else:
                 sentiment_label = "中性"
-                
             return sentiment_score, sentiment_label
         except:
             return 0.5, "中性"
@@ -305,81 +322,72 @@ class BilibiliTextAnalyzer:
     def analyze_comments(self):
         """分析评论数据"""
         print("\n=== 评论文本分析 ===")
-        
         if not self.comments_data:
             print("❌ 没有评论数据")
             return None
-        
-        # 转换为DataFrame
+
         df_comments = pd.DataFrame(self.comments_data)
-        
-        # 基本统计
         total_comments = len(df_comments)
         valid_comments = df_comments['content'].notna().sum()
         print(f"总评论数: {total_comments}")
         print(f"有效评论数: {valid_comments}")
-        
-        # 评论长度分析
+
         df_comments['content_length'] = df_comments['content'].astype(str).str.len()
         print(f"平均评论长度: {df_comments['content_length'].mean():.2f} 字符")
         print(f"最长评论: {df_comments['content_length'].max()} 字符")
         print(f"最短评论: {df_comments['content_length'].min()} 字符")
-        
+
+        # === 使用配置参数 ===
+        sample_size = self.config.get("analysis", {}).get("comment_sample_size", 5000)
+        top_k = self.config.get("analysis", {}).get("top_keywords", 20)
+
         # 情绪分析
         print("\n--- 评论情绪分析 ---")
         sentiments = []
         sentiment_labels = []
-        
-        sample_size = min(5000, len(df_comments))  # 限制样本大小以提高性能
+        sample_size = min(sample_size, len(df_comments))
         sample_comments = df_comments.sample(n=sample_size)['content'].tolist()
-        
         for comment in sample_comments:
             score, label = self.sentiment_analysis(comment)
             sentiments.append(score)
             sentiment_labels.append(label)
-        
         sentiment_counts = Counter(sentiment_labels)
         print(f"积极评论: {sentiment_counts['积极']} ({sentiment_counts['积极']/len(sentiment_labels)*100:.1f}%)")
         print(f"中性评论: {sentiment_counts['中性']} ({sentiment_counts['中性']/len(sentiment_labels)*100:.1f}%)")
         print(f"消极评论: {sentiment_counts['消极']} ({sentiment_counts['消极']/len(sentiment_labels)*100:.1f}%)")
         print(f"平均情绪得分: {np.mean(sentiments):.3f}")
-        
-        # 关键词提取 - 使用多种方法
+
+        # 关键词提取
         print("\n--- 评论关键词分析 ---")
         comment_texts = [str(comment) for comment in df_comments['content'].dropna()]
-        
-        # 高级组合方法
         print("🔍 使用高级组合方法提取关键词:")
-        advanced_keywords = self.extract_keywords_advanced(comment_texts, top_k=20)
+        advanced_keywords = self.extract_keywords_advanced(comment_texts, top_k=top_k)
         for i, (word, weight) in enumerate(advanced_keywords[:15], 1):
             print(f"{i:2d}. {word}: {weight:.4f}")
-        
-        # TF-IDF方法
+
         print("\n🔍 使用TF-IDF方法提取关键词:")
-        tfidf_keywords = self.extract_keywords(comment_texts, top_k=20, method='tfidf')
+        tfidf_keywords = self.extract_keywords(comment_texts, top_k=top_k, method='tfidf')
         for i, (word, weight) in enumerate(tfidf_keywords[:15], 1):
             print(f"{i:2d}. {word}: {weight:.4f}")
-        
-        # TextRank方法
+
         print("\n🔍 使用TextRank方法提取关键词:")
-        textrank_keywords = self.extract_keywords(comment_texts, top_k=20, method='textrank')
+        textrank_keywords = self.extract_keywords(comment_texts, top_k=top_k, method='textrank')
         for i, (word, weight) in enumerate(textrank_keywords[:15], 1):
             print(f"{i:2d}. {word}: {weight:.4f}")
-        
-        # 点赞数分析
+
         like_counts = pd.to_numeric(df_comments['like_count'], errors='coerce').fillna(0)
         print(f"\n--- 点赞数统计 ---")
         print(f"平均点赞数: {like_counts.mean():.2f}")
         print(f"最高点赞数: {like_counts.max()}")
         print(f"点赞数中位数: {like_counts.median()}")
-        
+
         return {
             'sentiment_distribution': dict(sentiment_counts),
             'sentiment_scores': sentiments,
             'advanced_keywords': advanced_keywords,
             'tfidf_keywords': tfidf_keywords,
             'textrank_keywords': textrank_keywords,
-            'keywords': advanced_keywords,  # 默认使用高级组合结果
+            'keywords': advanced_keywords,
             'basic_stats': {
                 'total': int(total_comments),
                 'valid': int(valid_comments),
@@ -503,33 +511,32 @@ class BilibiliTextAnalyzer:
         if not keywords:
             print("❌ 没有关键词数据，无法生成词云")
             return
-        
-        # 准备词云数据
         word_freq = {word: weight for word, weight in keywords}
-        
-        # 生成词云
+        # 读取词云配置
+        wc_cfg = self.config.get("analysis", {}).get("wordcloud", {})
+        width = wc_cfg.get("width", 1000)
+        height = wc_cfg.get("height", 500)
+        max_words = wc_cfg.get("max_words", 150)
+        background_color = wc_cfg.get("background_color", "white")
+        colormap = wc_cfg.get("colormap", "viridis")
         wordcloud = WordCloud(
-            font_path='C:/Windows/Fonts/simhei.ttf',  # 使用系统中文字体
-            width=1000,
-            height=500,
-            background_color='white',
-            max_words=150,
-            colormap='viridis',
+            font_path='C:/Windows/Fonts/simhei.ttf',
+            width=width,
+            height=height,
+            background_color=background_color,
+            max_words=max_words,
+            colormap=colormap,
             prefer_horizontal=0.7
         ).generate_from_frequencies(word_freq)
-        
         plt.figure(figsize=(15, 8))
         plt.imshow(wordcloud, interpolation='bilinear')
         plt.title(title, fontsize=18)
         plt.axis('off')
         plt.tight_layout()
-        
-        # 保存图片
         if save_path:
             os.makedirs(os.path.dirname(save_path), exist_ok=True)
             plt.savefig(save_path, dpi=300, bbox_inches='tight')
             print(f"💾 词云图已保存到: {save_path}")
-        
         plt.show()
     
     def create_visualizations(self, comment_analysis, content_analysis, creator_analysis):

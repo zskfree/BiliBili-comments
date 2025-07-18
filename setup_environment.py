@@ -15,8 +15,8 @@ MIRROR_SOURCES = {
 def check_python_version():
     """检查Python版本"""
     version = sys.version_info
-    if version.major < 3 or (version.major == 3 and version.minor < 8):
-        print("❌ 需要Python 3.8或更高版本")
+    if version.major < 3 or (version.major == 3 and version.minor < 12):
+        print("❌ 需要Python 3.12或更高版本")
         print(f"当前版本: {version.major}.{version.minor}.{version.micro}")
         return False
     print(f"✅ Python版本检查通过: {version.major}.{version.minor}.{version.micro}")
@@ -307,7 +307,7 @@ def main():
         core_packages = [
             "pandas", "numpy", "matplotlib", "seaborn", 
             "jieba", "snownlp", "wordcloud", "scikit-learn",
-            "tqdm", "jsonlines"
+            "tqdm", "jsonlines", "pyyaml" 
         ]
         
         failed_packages = []
