@@ -103,14 +103,26 @@ class BilibiliTextAnalyzer:
             jieba.add_word(word)
     
     def load_data(self):
-        """加载数据"""
+        """
+        自动递归遍历目标目录下所有子目录，加载所有评论、视频内容、创作者数据
+        """
+        base_dir = "data/消费就业"
+        self.comments_data = []
+        self.contents_data = []
+        self.creators_data = []
         try:
-            with open('data/search_comments_2025-07-14.json', 'r', encoding='utf-8') as f:
-                self.comments_data = json.load(f)
-            with open('data/search_contents_2025-07-14.json', 'r', encoding='utf-8') as f:
-                self.contents_data = json.load(f)
-            with open('data/search_creators_2025-07-14.json', 'r', encoding='utf-8') as f:
-                self.creators_data = json.load(f)
+            for root, dirs, files in os.walk(base_dir):
+                for fname in files:
+                    fpath = os.path.join(root, fname)
+                    if fname.startswith("search_comments") and fname.endswith(".json"):
+                        with open(fpath, "r", encoding="utf-8") as f:
+                            self.comments_data.extend(json.load(f))
+                    elif fname.startswith("search_contents") and fname.endswith(".json"):
+                        with open(fpath, "r", encoding="utf-8") as f:
+                            self.contents_data.extend(json.load(f))
+                    elif fname.startswith("search_creators") and fname.endswith(".json"):
+                        with open(fpath, "r", encoding="utf-8") as f:
+                            self.creators_data.extend(json.load(f))
             print("✅ 数据加载成功")
             print(f"评论数据: {len(self.comments_data)} 条")
             print(f"视频数据: {len(self.contents_data)} 条")
